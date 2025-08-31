@@ -1,35 +1,60 @@
+using api.Data;
+using api.Models;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
-namespace api;
+var builder = WebApplication.CreateBuilder(args);
 
-public class Program
+builder.Services.AddControllers();
+
+builder.Services.AddDbContext<DataContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DevConnection")));
+
+builder.Services.AddCors();
+
+builder.Services.AddIdentityApiEndpoints<User>(options =>
 {
-    public static void Main(string[] args)
-    {
-        var builder = WebApplication.CreateBuilder(args);
+    options.User.RequireUniqueEmail = true;
+})
+.AddRoles<IdentityRole>()
+.AddEntityFrameworkStores<DataContext>();
 
-        // Add services to the container.
+builder.Services.ConfigureApplicationCookie(options => { options.Cookie.SameSite = SameSiteMode.None; });
 
-        builder.Services.AddControllers();
-        // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-        builder.Services.AddEndpointsApiExplorer();
-        builder.Services.AddSwaggerGen();
+var app = builder.Build();
 
-        var app = builder.Build();
+// Pipeline =>
 
-        // Configure the HTTP request pipeline.
-        if (app.Environment.IsDevelopment())
-        {
-            app.UseSwagger();
-            app.UseSwaggerUI();
-        }
+app.UseCors(c => c
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials()
+    .WithOrigins("http://127.0.0.1:5500", "https://127.0.0.1:5500",
+        "http://localhost:5500", "https://localhost:5500")
+);
 
-        app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
-        app.UseAuthorization();
+app.MapControllers();
 
+app.MapGroup("api").MapIdentityApi<User>();
 
-        app.MapControllers();
+using var scope = app.Services.CreateScope();
 
-        app.Run();
-    }
+var services = scope.ServiceProvider;
+
+try
+{
+    var context = services.GetRequiredService<DataContext>();
+    var userManager = services.GetRequiredService<UserManager<User>>();
+    await Seed.SeedData(context, userManager);
 }
+catch (Exception ex)
+{
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    logger.LogError(ex, "Det gick fel vid migrering av databasen.");
+}
+
+app.Run();
+
